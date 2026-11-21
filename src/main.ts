@@ -4,15 +4,19 @@ import { WebGPUScene } from './render/WebGPUScene';
 import { DashboardHUD } from './ui/DashboardHUD';
 
 async function bootstrap(): Promise<void> {
-  const viewport = document.getElementById('viewport');
   const hudRoot = document.getElementById('hud');
-  if (!viewport || !hudRoot) {
-    throw new Error('Missing #viewport or #hud container');
+  if (!hudRoot) {
+    throw new Error('Missing #hud container');
   }
 
   const sim = new BiomechanicsSimulation();
+
+  // Build non-overlapping HUD shell first so #viewport gets real layout bounds
+  const hud = new DashboardHUD(hudRoot, sim);
+  const viewport = hud.getViewport();
+
   const scene = new WebGPUScene(viewport);
-  const hud = new DashboardHUD(hudRoot, sim, scene);
+  hud.attachScene(scene);
 
   // Expose debug handle for automated browser verification
   (window as unknown as Record<string, unknown>).__UNIT_D10__ = { sim, scene, hud };

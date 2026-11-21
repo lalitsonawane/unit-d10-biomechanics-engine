@@ -51,17 +51,17 @@ export class WebGPUScene {
   // Chase camera tracking
   private prevBodyPos = new THREE.Vector3(0, 0.665, 0);
   private cameraInitialized = false;
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
-    const width = container.clientWidth || window.innerWidth;
-    const height = container.clientHeight || window.innerHeight;
+    const { width, height } = this.readContainerSize();
 
     this.scene.background = new THREE.Color(0x0b0f16);
     this.scene.fog = new THREE.FogExp2(0x0b0f16, 0.026);
 
-    this.camera = new THREE.PerspectiveCamera(42, width / height, 0.05, 160);
-    this.camera.position.set(1.85, 1.38, -2.35);
+    this.camera = new THREE.PerspectiveCamera(42, width / Math.max(1, height), 0.05, 160);
+    this.camera.position.set(2.45, 1.62, -3.05);
 
     // 3-Point Aerospace Proving-Ground Lighting
     const hemi = new THREE.HemisphereLight(0xcbe2ff, 0x1c222d, 0.85);
@@ -185,16 +185,27 @@ export class WebGPUScene {
     return mat;
   }
 
+  private readContainerSize(): { width: number; height: number } {
+    const width = Math.max(1, this.container.clientWidth || 1);
+    const height = Math.max(1, this.container.clientHeight || 1);
+    return { width, height };
+  }
+
+  /** Aspect-aware distance scale so shorter/narrower stages keep the full dog framed. */
+  private framingScale(): number {
+    const aspect = this.camera.aspect || 1.5;
+    const tallBias = aspect < 1.35 ? 1.12 : aspect < 1.55 ? 1.06 : 1.0;
+    return tallBias;
+  }
+
   public async init(): Promise<void> {
     this.renderer = new THREE.WebGPURenderer({
       antialias: true,
       powerPreference: 'high-performance',
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(
-      this.container.clientWidth || window.innerWidth,
-      this.container.clientHeight || window.innerHeight
-    );
+    const { width, height } = this.readContainerSize();
+    this.renderer.setSize(width, height, true);
     this.renderer.shadowMap.enabled = true;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.12;
@@ -206,6 +217,9 @@ export class WebGPUScene {
     this.backendLabel = backendObj?.isWebGPUBackend ? 'WebGPU Native' : 'WebGPU Engine (WebGL2 Backend)';
 
     this.container.appendChild(this.renderer.domElement);
+    this.renderer.domElement.style.width = '100%';
+    this.renderer.domElement.style.height = '100%';
+    this.renderer.domElement.style.display = 'block';
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -213,18 +227,24 @@ export class WebGPUScene {
     this.controls.minDistance = 0.85;
     this.controls.maxDistance = 12.0;
     this.controls.maxPolarAngle = Math.PI * 0.49;
-    this.controls.target.set(0, 0.65, 0);
+    this.controls.target.set(0, 0.48, 0);
     this.controls.update();
 
+    // Size strictly from the #viewport stage (panel collapse / window resize)
+    this.resizeObserver = new ResizeObserver(() => this.handleResize());
+    this.resizeObserver.observe(this.container);
     window.addEventListener('resize', this.handleResize);
+    this.handleResize();
   }
 
   private handleResize = (): void => {
-    const w = this.container.clientWidth || window.innerWidth;
-    const h = this.container.clientHeight || window.innerHeight;
-    this.camera.aspect = w / h;
+    if (!this.renderer) return;
+    const { width, height } = this.readContainerSize();
+    this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h);
+    this.renderer.setSize(width, height, true);
+    this.renderer.domElement.style.width = '100%';
+    this.renderer.domElement.style.height = '100%';
   };
 
   public setCameraPreset(preset: CameraPreset): void {
@@ -301,6 +321,11 @@ export class WebGPUScene {
     this.renderer.render(this.scene, this.camera);
   }
 
+  private lookAtY(bodyY: number): number {
+    // Bias look-at toward mid-lower body so paws & support poly stay framed with margin
+    return bodyY * 0.62;
+  }
+
   private updateCamera(snap: SimulationSnapshot): void {
     const bp = snap.body.pos;
     const yaw = snap.body.euler.yaw;
@@ -308,11 +333,13 @@ export class WebGPUScene {
     const fwdZ = -Math.sin(yaw);
     const rightX = Math.sin(yaw);
     const rightZ = Math.cos(yaw);
+    const scale = this.framingScale();
+    const lookY = this.lookAtY(bp.y);
 
     if (!this.cameraInitialized) {
       this.prevBodyPos.set(bp.x, bp.y, bp.z);
-      this.camera.position.set(bp.x + 1.85, bp.y + 0.72, bp.z - 2.25);
-      this.controls.target.set(bp.x, bp.y * 0.85 + 0.1, bp.z);
+      this.camera.position.set(bp.x + 2.45 * scale, bp.y + 0.92, bp.z - 3.05 * scale);
+      this.controls.target.set(bp.x, lookY, bp.z);
       this.controls.update();
       this.cameraInitialized = true;
     }
@@ -326,60 +353,62 @@ export class WebGPUScene {
         this.camera.position.x += dx;
         this.camera.position.y += dy;
         this.camera.position.z += dz;
-        this.controls.target.set(bp.x, bp.y * 0.85 + 0.1, bp.z);
+        this.controls.target.set(bp.x, lookY, bp.z);
         this.controls.update();
         break;
       }
 
       case 'side': {
-        // Blueprint View A — Left Profile Elevation (looking from left -Z side toward right +Z)
-        const dist = 2.65;
+        // Blueprint View A — Left Profile Elevation with margin for paws & foot rings
+        const dist = 3.35 * scale;
         const desiredPos = new THREE.Vector3(
           bp.x - rightX * dist,
-          bp.y + 0.08,
+          Math.max(0.55, lookY + 0.28),
           bp.z - rightZ * dist
         );
         this.camera.position.lerp(desiredPos, 0.16);
-        this.camera.lookAt(bp.x + fwdX * 0.06, bp.y + 0.04, bp.z + fwdZ * 0.06);
+        this.camera.lookAt(bp.x + fwdX * 0.04, lookY, bp.z + fwdZ * 0.04);
         break;
       }
 
       case 'front': {
         // Blueprint View B — Front Elevation
-        const dist = 2.45;
+        const dist = 3.25 * scale;
         const desiredPos = new THREE.Vector3(
           bp.x + fwdX * dist,
-          bp.y + 0.12,
+          Math.max(0.58, lookY + 0.32),
           bp.z + fwdZ * dist
         );
         this.camera.position.lerp(desiredPos, 0.16);
-        this.camera.lookAt(bp.x, bp.y + 0.05, bp.z);
+        this.camera.lookAt(bp.x, lookY, bp.z);
         break;
       }
 
       case 'top': {
         // Blueprint View C — Top Plan View & Turret Slew Envelope
-        const desiredPos = new THREE.Vector3(bp.x - fwdX * 0.05, bp.y + 3.05, bp.z - fwdZ * 0.05);
+        const height = 3.95 * scale;
+        const desiredPos = new THREE.Vector3(bp.x - fwdX * 0.05, bp.y + height, bp.z - fwdZ * 0.05);
         this.camera.position.lerp(desiredPos, 0.16);
-        this.camera.lookAt(bp.x, bp.y, bp.z);
+        this.camera.lookAt(bp.x, lookY, bp.z);
         break;
       }
 
       case 'turret': {
-        // Dramatic over-the-railgun barrel chase view!
+        // Dramatic over-the-railgun barrel chase view with clearer ground margin
         const azTotal = yaw + snap.secondary.turretAzimuth;
         const tFwdX = Math.cos(azTotal);
         const tFwdZ = -Math.sin(azTotal);
+        const pullback = 2.05 * scale;
         const desiredPos = new THREE.Vector3(
-          bp.x - tFwdX * 1.45,
-          bp.y + 0.82,
-          bp.z - tFwdZ * 1.45
+          bp.x - tFwdX * pullback,
+          bp.y + 1.08,
+          bp.z - tFwdZ * pullback
         );
         this.camera.position.lerp(desiredPos, 0.18);
         this.camera.lookAt(
-          bp.x + tFwdX * 1.8,
-          bp.y + 0.32 + Math.sin(snap.secondary.turretElevation) * 1.5,
-          bp.z + tFwdZ * 1.8
+          bp.x + tFwdX * 1.55,
+          lookY + 0.12 + Math.sin(snap.secondary.turretElevation) * 1.25,
+          bp.z + tFwdZ * 1.55
         );
         break;
       }

@@ -24,7 +24,7 @@ const LEG_COLORS: Record<LegId, string> = {
 
 export class DashboardHUD {
   private readonly sim: BiomechanicsSimulation;
-  private readonly scene: WebGPUScene;
+  private scene: WebGPUScene | null = null;
   private readonly root: HTMLElement;
 
   // Dynamic readout elements
@@ -64,48 +64,72 @@ export class DashboardHUD {
   private camButtons = new Map<CameraPreset, HTMLButtonElement>();
   private timeButtons = new Map<number, HTMLButtonElement>();
   private pauseBtn!: HTMLButtonElement;
+  private panelsToggleBtn!: HTMLButtonElement;
+  private telemetryToggleBtn!: HTMLButtonElement;
+  private workspaceEl!: HTMLElement;
+  private bottomEl!: HTMLElement;
 
-  constructor(root: HTMLElement, sim: BiomechanicsSimulation, scene: WebGPUScene) {
+  private panelsCollapsed = false;
+  private telemetryCollapsed = false;
+
+  constructor(root: HTMLElement, sim: BiomechanicsSimulation) {
     this.root = root;
     this.sim = sim;
-    this.scene = scene;
     this.buildDOM();
-    this.bindEvents();
+    this.bindSimEvents();
+  }
+
+  /** Bind the WebGPU scene after the #viewport stage exists in the layout. */
+  public attachScene(scene: WebGPUScene): void {
+    this.scene = scene;
+    this.bindSceneEvents();
+  }
+
+  public getViewport(): HTMLElement {
+    const el = document.getElementById('viewport');
+    if (!el) throw new Error('Missing #viewport stage in HUD layout');
+    return el;
   }
 
   private buildDOM(): void {
     this.root.innerHTML = `
       <header class="hud-topbar">
-        <div class="brand-group">
-          <div class="brand-dot"></div>
-          <div>
-            <div class="brand-title">UNIT D-10 · ELECTROMAGNETIC DOG</div>
-            <div class="brand-sub">DWG D10-GA-002 · 55.0 KG · 240 HZ WBC BIOMECHANICS ENGINE</div>
+        <div class="topbar-row topbar-brand-row">
+          <div class="brand-group">
+            <div class="brand-dot"></div>
+            <div>
+              <div class="brand-title">UNIT D-10 · ELECTROMAGNETIC DOG</div>
+              <div class="brand-sub">DWG D10-GA-002 · 55.0 KG · 240 HZ WBC BIOMECHANICS ENGINE</div>
+            </div>
+            <span class="badge" id="hud-backend">WebGPU</span>
+            <span class="badge emerald" id="hud-fps">60 FPS · 240 Hz</span>
           </div>
-          <span class="badge" id="hud-backend">WebGPU</span>
-          <span class="badge emerald" id="hud-fps">60 FPS · 240 Hz</span>
+
+          <div class="pill-row" id="time-pills">
+            <button class="pill-btn active" data-scale="1">1.0x</button>
+            <button class="pill-btn" data-scale="0.5">0.5x</button>
+            <button class="pill-btn" data-scale="0.25">0.25x</button>
+            <button class="pill-btn" data-scale="0.1">0.1x</button>
+            <button class="pill-btn warn" id="btn-pause">PAUSE</button>
+            <button class="pill-btn" id="btn-step">+4.17ms</button>
+            <button class="pill-btn" id="btn-reset">RESET</button>
+            <button class="pill-btn" id="btn-panels" title="Toggle side panels (H)">PANELS</button>
+            <button class="pill-btn" id="btn-telemetry" title="Toggle telemetry strip (H)">TELEM</button>
+          </div>
         </div>
 
-        <div class="pill-row" id="cam-pills">
-          <button class="pill-btn active" data-cam="orbit">ORBIT</button>
-          <button class="pill-btn" data-cam="side">SIDE A</button>
-          <button class="pill-btn" data-cam="front">FRONT B</button>
-          <button class="pill-btn" data-cam="top">TOP C</button>
-          <button class="pill-btn" data-cam="turret">TURRET</button>
-        </div>
-
-        <div class="pill-row" id="time-pills">
-          <button class="pill-btn active" data-scale="1">1.0x</button>
-          <button class="pill-btn" data-scale="0.5">0.5x</button>
-          <button class="pill-btn" data-scale="0.25">0.25x</button>
-          <button class="pill-btn" data-scale="0.1">0.1x</button>
-          <button class="pill-btn warn" id="btn-pause">PAUSE</button>
-          <button class="pill-btn" id="btn-step">+4.17ms</button>
-          <button class="pill-btn" id="btn-reset">RESET</button>
+        <div class="topbar-row topbar-cam-row">
+          <div class="pill-row" id="cam-pills">
+            <button class="pill-btn active" data-cam="orbit">ORBIT</button>
+            <button class="pill-btn" data-cam="side">SIDE A</button>
+            <button class="pill-btn" data-cam="front">FRONT B</button>
+            <button class="pill-btn" data-cam="top">TOP C</button>
+            <button class="pill-btn" data-cam="turret">TURRET</button>
+          </div>
         </div>
       </header>
 
-      <div class="hud-middle">
+      <div class="hud-workspace" id="hud-workspace">
         <div class="left-hints">
           <div class="spec-card">
             <div class="spec-card-title">
@@ -129,9 +153,12 @@ export class DashboardHUD {
               <span class="kbd">SPACE</span><span>Fire Dorsal Railgun</span>
               <span class="kbd">P</span><span>Apply Lateral Shove</span>
               <span class="kbd">C / X</span><span>Camera / X-Ray Skeleton</span>
+              <span class="kbd">H</span><span>Toggle Panels / Telemetry</span>
             </div>
           </div>
         </div>
+
+        <div id="viewport" aria-label="Unit D-10 3D viewport"></div>
 
         <aside class="control-dock">
           <div>
@@ -223,7 +250,7 @@ export class DashboardHUD {
         </aside>
       </div>
 
-      <footer class="hud-bottom">
+      <footer class="hud-bottom" id="hud-bottom">
         <div class="telemetry-panel">
           <div class="section-label" style="margin-bottom: 0">
             <span>4-LEG GROUND REACTION FORCES (240 HZ OSCILLOSCOPE)</span>
@@ -233,7 +260,7 @@ export class DashboardHUD {
             </div>
           </div>
           <div class="scope-wrap">
-            <canvas id="grf-scope" width="520" height="92"></canvas>
+            <canvas id="grf-scope" width="520" height="64"></canvas>
           </div>
         </div>
 
@@ -296,6 +323,10 @@ export class DashboardHUD {
     this.grfCanvas = document.getElementById('grf-scope') as HTMLCanvasElement;
     this.grfCtx = this.grfCanvas.getContext('2d')!;
     this.pauseBtn = document.getElementById('btn-pause') as HTMLButtonElement;
+    this.panelsToggleBtn = document.getElementById('btn-panels') as HTMLButtonElement;
+    this.telemetryToggleBtn = document.getElementById('btn-telemetry') as HTMLButtonElement;
+    this.workspaceEl = document.getElementById('hud-workspace')!;
+    this.bottomEl = document.getElementById('hud-bottom')!;
 
     for (const id of LEG_IDS) {
       this.legForceEls[id] = document.getElementById(`leg-f-${id}`)!;
@@ -327,13 +358,36 @@ export class DashboardHUD {
     });
   }
 
-  private bindEvents(): void {
-    // Gait selector buttons
+  private setPanelsCollapsed(collapsed: boolean): void {
+    this.panelsCollapsed = collapsed;
+    this.workspaceEl.classList.toggle('panels-collapsed', collapsed);
+    this.panelsToggleBtn.classList.toggle('active', collapsed);
+    this.panelsToggleBtn.textContent = collapsed ? 'PANELS+' : 'PANELS';
+  }
+
+  private setTelemetryCollapsed(collapsed: boolean): void {
+    this.telemetryCollapsed = collapsed;
+    this.bottomEl.classList.toggle('collapsed', collapsed);
+    this.telemetryToggleBtn.classList.toggle('active', collapsed);
+    this.telemetryToggleBtn.textContent = collapsed ? 'TELEM+' : 'TELEM';
+  }
+
+  private toggleHudChrome(): void {
+    // H cycles: both open → collapse both → restore both
+    if (!this.panelsCollapsed && !this.telemetryCollapsed) {
+      this.setPanelsCollapsed(true);
+      this.setTelemetryCollapsed(true);
+    } else {
+      this.setPanelsCollapsed(false);
+      this.setTelemetryCollapsed(false);
+    }
+  }
+
+  private bindSimEvents(): void {
     this.gaitButtons.forEach((btn, mode) => {
       btn.addEventListener('click', () => this.selectGait(mode));
     });
 
-    // Terrain selector buttons
     this.terrainButtons.forEach((btn, mode) => {
       btn.addEventListener('click', () => {
         this.sim.setTerrain(mode);
@@ -341,12 +395,6 @@ export class DashboardHUD {
       });
     });
 
-    // Camera presets
-    this.camButtons.forEach((btn, preset) => {
-      btn.addEventListener('click', () => this.selectCamera(preset));
-    });
-
-    // Time scale pills
     this.timeButtons.forEach((btn, scale) => {
       btn.addEventListener('click', () => {
         this.sim.command.timeScale = scale;
@@ -371,7 +419,14 @@ export class DashboardHUD {
       this.sim.reset(0);
     });
 
-    // Sliders
+    this.panelsToggleBtn.addEventListener('click', () => {
+      this.setPanelsCollapsed(!this.panelsCollapsed);
+    });
+
+    this.telemetryToggleBtn.addEventListener('click', () => {
+      this.setTelemetryCollapsed(!this.telemetryCollapsed);
+    });
+
     this.speedSlider.addEventListener('input', () => {
       const v = Number(this.speedSlider.value);
       this.sim.command.desiredSpeed = v;
@@ -396,7 +451,6 @@ export class DashboardHUD {
       this.elVal.textContent = `${deg.toFixed(1)}°`;
     });
 
-    // Weapon & perturbation actions
     document.getElementById('btn-fire')!.addEventListener('click', () => {
       this.sim.fireRailgun();
     });
@@ -411,20 +465,6 @@ export class DashboardHUD {
       this.sim.triggerDropTest(0.55);
     });
 
-    // Overlay toggles
-    this.root.querySelectorAll<HTMLButtonElement>('[data-ov]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const key = btn.dataset.ov as keyof typeof this.scene.overlays.visibility;
-        const next = !this.scene.overlays.visibility[key];
-        this.scene.overlays.visibility[key] = next;
-        btn.classList.toggle('on', next);
-        if (key === 'skeleton') {
-          this.scene.robot.setXrayMode(next);
-        }
-      });
-    });
-
-    // Keyboard controls
     const keysDown = new Set<string>();
     window.addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement) return;
@@ -447,7 +487,10 @@ export class DashboardHUD {
         shoveDir = shoveDir === 1 ? -1 : 1;
       } else if (code === 'KeyR') {
         this.sim.reset(0);
+      } else if (code === 'KeyH') {
+        this.toggleHudChrome();
       } else if (code === 'KeyC') {
+        if (!this.scene) return;
         const order: CameraPreset[] = ['orbit', 'side', 'front', 'top', 'turret'];
         const next = order[(order.indexOf(this.scene.cameraPreset) + 1) % order.length];
         this.selectCamera(next);
@@ -497,6 +540,27 @@ export class DashboardHUD {
     });
   }
 
+  private bindSceneEvents(): void {
+    if (!this.scene) return;
+
+    this.camButtons.forEach((btn, preset) => {
+      btn.addEventListener('click', () => this.selectCamera(preset));
+    });
+
+    this.root.querySelectorAll<HTMLButtonElement>('[data-ov]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (!this.scene) return;
+        const key = btn.dataset.ov as keyof typeof this.scene.overlays.visibility;
+        const next = !this.scene.overlays.visibility[key];
+        this.scene.overlays.visibility[key] = next;
+        btn.classList.toggle('on', next);
+        if (key === 'skeleton') {
+          this.scene.robot.setXrayMode(next);
+        }
+      });
+    });
+  }
+
   public selectGait(mode: GaitMode): void {
     this.sim.setGait(mode, true);
     this.gaitButtons.forEach((b, m) => b.classList.toggle('active', m === mode));
@@ -506,6 +570,7 @@ export class DashboardHUD {
   }
 
   public selectCamera(preset: CameraPreset): void {
+    if (!this.scene) return;
     this.scene.setCameraPreset(preset);
     this.camButtons.forEach((b, p) => b.classList.toggle('active', p === preset));
   }
@@ -533,7 +598,9 @@ export class DashboardHUD {
       const muPct = Math.round(snap.body.frictionRatio[id] * 100);
       const inContact = snap.legs[id].inContact;
       this.legForceEls[id].textContent = `${fn.toFixed(0)} N`;
-      this.legSubEls[id].textContent = inContact ? `STANCE · μ ${muPct}%` : `SWING ${(snap.legs[id].clearance * 100).toFixed(0)}cm`;
+      this.legSubEls[id].textContent = inContact
+        ? `STANCE · μ ${muPct}%`
+        : `SWING ${(snap.legs[id].clearance * 100).toFixed(0)}cm`;
       this.legCellEls[id].classList.toggle('contact', inContact);
     }
 
