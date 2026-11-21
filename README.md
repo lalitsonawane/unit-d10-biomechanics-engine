@@ -41,4 +41,5 @@ npm run build # Runs TypeScript typecheck and Vite production bundle
 | `P` | Apply lateral perturbation shove |
 | `C` | Cycle camera views (Orbit / Side A / Front B / Top C / Turret) |
 | `X` | Toggle X-Ray kinematic skeleton overlay |
+| `H` | Toggle side panels + bottom telemetry (unobstructed viewport) |
 | `R` | Reset simulation pose |

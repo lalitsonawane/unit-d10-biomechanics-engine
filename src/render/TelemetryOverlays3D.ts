@@ -50,7 +50,7 @@ export class TelemetryOverlays3D {
 
   // Support polygon outline & fill
   private readonly supportLineGeo: THREE.BufferGeometry;
-  private readonly supportLine: THREE.LineLoop;
+  private readonly supportLine: THREE.Line;
   private readonly comPlumbGeo: THREE.BufferGeometry;
   private readonly comPlumbLine: THREE.Line;
   private readonly comGroundDisc: THREE.Mesh;
@@ -116,12 +116,13 @@ export class TelemetryOverlays3D {
     this.arrows = arrows;
 
     // 2. Support Polygon + CoM Ground Projection + ZMP / CoP Indicator
+    // WebGPU renderer does not support LineLoop — close the polygon with an extra vertex
     this.supportLineGeo = new THREE.BufferGeometry();
     this.supportLineGeo.setAttribute(
       'position',
-      new THREE.BufferAttribute(new Float32Array(4 * 3), 3)
+      new THREE.BufferAttribute(new Float32Array(5 * 3), 3)
     );
-    this.supportLine = new THREE.LineLoop(
+    this.supportLine = new THREE.Line(
       this.supportLineGeo,
       new THREE.LineBasicNodeMaterial({ color: 0x10b981, transparent: true, opacity: 0.85 })
     );
@@ -257,6 +258,9 @@ export class TelemetryOverlays3D {
           const p = contactPoints[Math.min(i, contactPoints.length - 1)];
           posAttr.setXYZ(i, p.x, p.y + 0.012, p.z);
         }
+        // Duplicate first vertex to close the loop (Line, not LineLoop)
+        const first = contactPoints[0];
+        posAttr.setXYZ(4, first.x, first.y + 0.012, first.z);
         posAttr.needsUpdate = true;
       } else {
         this.supportLine.visible = false;
