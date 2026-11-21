@@ -1,5 +1,7 @@
 # Unit D-10 · 240Hz Three.js WebGPU Biomechanics Engine
 
+**Live Demo**: [https://unit-d10-biomechanics-engine.vercel.app](https://unit-d10-biomechanics-engine.vercel.app)
+
 An interactive **240Hz quadruped biomechanics and rigid-body physics engine** built with **Three.js WebGPU (`three/webgpu` + `three/tsl`)** and TypeScript, modeled strictly after the **Unit D-10 Electromagnetic Dog** blueprint (`DWG NO. D10-GA-002`).
 
 ## Key Capabilities

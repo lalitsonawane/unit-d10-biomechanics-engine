@@ -20,6 +20,7 @@ All automated physics & IK tests (`npm test`) and production builds (`npm run bu
 
 ## Artifacts/links
 
+- Live deployment (Vercel): https://unit-d10-biomechanics-engine.vercel.app
 - GitHub repository: https://github.com/lalitsonawane/unit-d10-biomechanics-engine
 - Key modules: `src/specs/unitD10Specs.ts`, `src/physics/RigidBodyEngine.ts`, `src/kinematics/QuadrupedIK.ts`, `src/locomotion/GaitController.ts`, `src/biomechanics/SpineSolver.ts`, `src/biomechanics/SecondaryDynamics.ts`, `src/engine/BiomechanicsSimulation.ts`, `src/rig/UnitD10Model.ts`, `src/render/WebGPUScene.ts`, `src/render/TelemetryOverlays3D.ts`, `src/ui/DashboardHUD.ts`
 - Verification suite: `src/tests/verifyBiomechanics.ts` (`npm test` passed)
